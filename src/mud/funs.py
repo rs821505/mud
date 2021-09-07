@@ -88,7 +88,24 @@ def run():
 ############################################################
 
 
-def wme(X, data, sd=None):
+#TODO :https://github.com/mathematicalmichael/mud/issues/42 
+def wme(Y, data, sd=None):
+    """Weighted Mean Error
+    Computes Weighted Mean Error Map of `Y` to observed values `data`.
+
+    .. math::
+        WME(X) = ...
+
+    Args:
+      X (ndarray): 1D or 2D array containing value or values (resp.) to compute WME map for.
+        Note the second dimension of `X`, or in the 1D case the length of `X`, corresponds to the
+        number of data points N used to compute WME map and should match the length of `data`.
+      data (ndarray): 1D array containing observed data.
+      sd (ndarray): Standard deviation corresponding to measruement noise from observed `data`.
+
+    Returns:
+      ndarray: 1D array containing value(s) of WME(X).
+    """
     if sd is None:
         sd = np.std(data)
     if X.ndim == 1:
@@ -105,6 +122,30 @@ def wme(X, data, sd=None):
 
 
 def makeRi(A, initial_cov):
+    """Effective Regularization for Linear Maps with Gaussian Distributions
+
+    For the case of linear (or affine) maps
+
+    .. math::
+        Q(\lambda) = A\lambda + b
+
+    with initial and prior densities given by  gaussian distributions :math: \mathcal{N}(\lambda_0, \Sigma_{init}),
+    computes the effective regularization defined as
+
+    .. math::
+        R := \Sigma^{-1}_{init} - A^T\Sigma_{pred}^{-1}A
+
+    used in the functional
+
+    .. math::
+        J(\lambda) := ||y-Q(\lambda)||^2_{\Sigma^{-1}_{obs}} + ||\lambda - \lambda_0||^2_R
+
+    minizimed in the data-consistent framework when solving the inverse problem. This
+    regularization incorporates an additional term that serves as "unregulraization" in
+    data-informed directions. For more information, see Section 3 in (paper link?).
+
+
+    """
     predicted_cov = A @ initial_cov @ A.T
     if isinstance(predicted_cov, float):
         ipc = 1.0 / predicted_cov * np.eye(1)
@@ -279,6 +320,14 @@ def performEpoch(A, b, y, initial_mean, initial_cov, data_cov=None, idx=None):
 
 
 def iterate(A, b, y, initial_mean, initial_cov, data_cov=None, num_epochs=1, idx=None):
+    """
+    Sequential Mud Inversions
+    Performs num_epochs iterations of a sequential mud inversion on rows of linear map A, assuming
+    linear QoI map
+
+    $ Q(\lambda) = 
+
+    """
     chain = performEpoch(A, b, y, initial_mean, initial_cov, data_cov, idx)
     for _ in range(1, num_epochs):
         chain += performEpoch(A, b, y, chain[-1], initial_cov, data_cov, idx)

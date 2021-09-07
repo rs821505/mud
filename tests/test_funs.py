@@ -55,6 +55,11 @@ class TestWME(unittest.TestCase):
         assert len(wme) == self.A.shape[0]
         assert sum(wme) == 0
 
+        # Same as above, but 1D input (should handle as well)
+        wme = mdf.wme(self.A[0], self.d, sd=1)
+        assert len(wme) == 1
+        assert sum(wme) == 0
+
     def test_wme_with_no_sd(self):
         # all residuals are one. answer should be N/(sd*sqrt(N))
         wme = mdf.wme(1 + self.A, self.d)
