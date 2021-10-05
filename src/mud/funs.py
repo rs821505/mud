@@ -91,29 +91,30 @@ def run():
 #TODO :https://github.com/mathematicalmichael/mud/issues/42 
 def wme(Y, data, sd=None):
     """Weighted Mean Error
-    Computes Weighted Mean Error Map of `Y` to observed values `data`.
+    Computes Weighted Mean Error Map of `Y`, the forward evaluation of initial samples,  to
+    observed values `data`.
 
     .. math::
         WME(X) = ...
 
     Args:
-      X (ndarray): 1D or 2D array containing value or values (resp.) to compute WME map for.
-        Note the second dimension of `X`, or in the 1D case the length of `X`, corresponds to the
+      Y (ndarray): 1D or 2D array containing forward evaluations of initial sample(s).
+        Note the second dimension of `Y`, or in the 1D case the length of `Y`, corresponds to the
         number of data points N used to compute WME map and should match the length of `data`.
       data (ndarray): 1D array containing observed data.
       sd (ndarray): Standard deviation corresponding to measruement noise from observed `data`.
 
     Returns:
-      ndarray: 1D array containing value(s) of WME(X).
+      ndarray: 1D array containing value(s) of WME(Y).
     """
     if sd is None:
         sd = np.std(data)
-    if X.ndim == 1:
-        X = X.reshape(1, -1)
-    num_evals = X.shape[0]
-    assert X.shape[1] == len(data)
+    if Y.ndim == 1:
+        Y = Y.reshape(1, -1)
+    num_evals = Y.shape[0]
+    assert Y.shape[1] == len(data)
 
-    residuals = np.subtract(X, data)
+    residuals = np.subtract(Y, data)
     weighted_residuals = np.divide(residuals, sd)
     assert weighted_residuals.shape[0] == num_evals
 
