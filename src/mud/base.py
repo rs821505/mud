@@ -9,18 +9,19 @@ class LinearGaussianProblem(object):
 
     """
 
-    def __init__(self, A, b, y=None, mean=None, cov=None, data_cov=None):
+    def __init__(self, A, b=None, y=None, mean=None, cov=None,
+            data_cov=None):
 
-        self.A = A
-        self.b = b
+        # Make sure A is 2D array
+        self.A = A.reshape(1, -1)
 
-        # Initialize to defaults
+        # Initialize to defaults - Reshape everythin into 2D arrays.
         n_samples, dim_input = self.A.shape
         self.data_cov = np.eye(n_samples) if data_cov is None else data_cov
         self.cov = np.eye(dim_input) if cov is None else cov
         self.mean = np.zeros((dim_input, 1)) if mean is None else mean.reshape(-1,1)
         self.b = np.zeros((n_samples, 1)) if b is None else b.reshape(-1,1)
-        self.y = np.zeros(n_samples) if y is None else y.reshape(-1,1)
+        self.y = np.zeros((n_samples,1)) if y is None else y.reshape(-1,1)
 
         n_data, n_targets = y.shape
 
@@ -36,94 +37,92 @@ class LinearGaussianProblem(object):
         # Update to residual we initialize to None. Evaluate in fit function
         self.update = None
 
-    def fit(self):
-        raise NotImplementedError
+        # Initialize to no solution
+        self.sol = None
 
 
-    def estimate(self):
-        raise NotImplementedError
-
-
-class LinearMUD(LinearGaussianProblem):
-    """
-
-    """
-
-    def __init__(self, A, b, y=None, mean=None, cov=None, data_cov=None):
-        super.__init__(A, b, y=y, mean=mean, cov=cov, data_cov=data_cov)
-        self.mud_point = None
-
-
-    def updated_cov(X, init_cov=None, data_cov=None):
-        """
-        We start with the posterior covariance from ridge regression
-        Our matrix R = init_cov^(-1) - X.T @ pred_cov^(-1) @ X
-        replaces the init_cov from the posterior covariance equation.
-        Simplifying, this is given as the following, which is not used
-        due to issues of numerical stability (a lot of inverse operations).
-
-        up_cov = (X.T @ np.linalg.inv(data_cov) @ X + R )^(-1)
-        up_cov = np.linalg.inv(\
-            X.T@(np.linalg.inv(data_cov) - inv_pred_cov)@X + \
-            np.linalg.inv(init_cov) )
-
-        We return the updated covariance using a form of it derived
-        which applies Hua's identity in order to use Woodbury's identity.
-
-        >>> updated_cov(np.eye(2))
-        array([[1., 0.],
-               [0., 1.]])
-        >>> updated_cov(np.eye(2)*2)
-        array([[0.25, 0.  ],
-               [0.  , 0.25]])
-        >>> updated_cov(np.eye(3)[:, :2]*2, data_cov=np.eye(3))
-        array([[0.25, 0.  ],
-               [0.  , 0.25]])
-        >>> updated_cov(np.eye(3)[:, :2]*2, init_cov=np.eye(2))
-        array([[0.25, 0.  ],
-               [0.  , 0.25]])
-        """
-        if init_cov is None:
-            init_cov = np.eye(X.shape[1])
-        else:
-            assert X.shape[1] == init_cov.shape[1]
-
-        if data_cov is None:
-            data_cov = np.eye(X.shape[0])
-        else:
-            assert X.shape[0] == data_cov.shape[1]
-
-        pred_cov = X @ init_cov @ X.T
-        inv_pred_cov = np.linalg.pinv(pred_cov)
-        # pinv b/c inv unstable for rank-deficient A
-
-        # Form derived via Hua's identity + Woodbury
-        K = init_cov @ X.T @ inv_pred_cov
-        up_cov = init_cov - K @ (pred_cov - data_cov) @ K.T
-
-        return up_cov
-
-
-    def mud_point(self, method='default'):
-        """
-        Compute MUD Point
+    def plot_contours(self, ref_param, ax, subset=None,
+            color="k", ls=":", lw=1, fs=20, w=1, s=100, **kwds):
+        """Plot Linear Map Contours
 
         """
-        if method=='default':
+        # All rows of A are default subset of contours to plot
+        subset = np.arange(self.A.shape[0]) if subset is None else subset
+
+        A = self.A[np.array(subset), :]
+        numQoI = A.shape[0]
+        AA = np.hstack([null_space(A[i, :].reshape(1, -1)) for i in range(numQoI)]).T
+        for i, contour in enumerate(subset):
+            xloc = [ref_param[0] - w * AA[i, 0], ref_param[1] + w * AA[i, 0]]
+            yloc = [ref_param[0] - w * AA[i, 1], ref_param[1] + w * AA[i, 1]]
+            ax.plot(xloc, yloc, c=color, ls=ls, lw=lw, **kwds)
+            ax.annotate("%d" % (contour + 1), (xloc[0], yloc[0]), fontsize=fs)
+
+
+    def solve(self, method='mud', w=1):
+        """
+        Explicitly solve linear problem using given method.
+
+        """
+        if method == 'mud':
             inv_pred_cov = np.linalg.pinv(self.A @ self.cov @ self.A.T)
             self.update = self.cov @ self.A.T @ inv_pred_cov
-        else:
-            up_cov = updated_cov(X=A, init_cov=cov, data_cov=data_cov)
+        elif method == 'mud-alt':
+            up_cov = self.updated_cov(X=A, init_cov=cov, data_cov=data_cov)
             self.update = up_cov @ A.T @ np.linalg.inv(data_cov)
+        elif method == 'bayes':
+            dc_i = inv(self.data_cov)
+            post_cov = inv(self.A.T @ dc_i @ self.A + self.w * inv(self.cov))
+            self.update = post_cov @ A.T @ dc_i
 
-        self.mud = self.mean + self.update @ self.z
-
-        return self.mud
+        self.sol = self.mean + self.update @ self.z
 
 
     def estimate(self):
-        if self.mud_point is None:
-            return self.mud_point()
+        if self.sol is None:
+            return self.sol()
+
+
+class IterativeLinearProblem(object):
+
+
+    def __init__(self, A, b, y=None, initial_mean=None, cov=None, data_cov=None,
+            idx_order=None):
+        # Make sure A is 2D array
+        self.A = A.reshape(1, -1)
+
+        # Initialize to defaults - Reshape everythin into 2D arrays.
+        n_samples, dim_input = self.A.shape
+        self.data_cov = np.eye(n_samples) if data_cov is None else data_cov
+        self.cov = np.eye(dim_input) if cov is None else cov
+        self.initial_mean = np.zeros((dim_input, 1)) if initial_mean is None else initial_mean.reshape(-1,1)
+        self.b = np.zeros((n_samples, 1)) if b is None else b.reshape(-1,1)
+        self.y = np.zeros(n_samples) if y is None else y.reshape(-1,1)
+        self.idx_order = range(self.A.shape[0]) if idx_order is None else idx_order
+
+        # Verify arguments?
+
+        # Initialize chain to initial mean
+        self.sub_probs = []
+        self.solution_chain = [initial_mean]
+
+
+    def iterate(self, num_epochs=1, idx=None, method='MUD'):
+        """
+        Iterative Solutions
+        Performs num_epochs iterations of estimates
+
+        """
+        for _ in range(num_epochs):
+            for i in self.idx_order:
+                # Add next sub-problem to chain
+                self.sub_probs.append(LinearMUD(A[i, :], b[i], y[i],
+                    mean=self.mud_chain[-1],
+                    cov=self.cov,
+                    data_cov=self.data_cov))
+
+                # Solve next mud problem
+                mud_chain.append(prob.estimate())
 
 
 class LinearBayes(LinearGaussianProblem):
@@ -542,5 +541,4 @@ class WeightedDensityProblem(DensityProblem):
         if self._up is None:
             self.fit()
         return np.average(self._r, weights=self._weights)
-
 

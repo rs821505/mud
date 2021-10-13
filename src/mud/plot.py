@@ -22,6 +22,9 @@ def plotChain(mud_chain, ref_param, color="k", s=100):
 def plot_contours(
     A, ref_param, subset=None, color="k", ls=":", lw=1, fs=20, w=1, s=100, **kwds
 ):
+    """Plot Linear Map Contours
+
+    """
     if subset is None:
         subset = np.arange(A.shape[0])
     A = A[np.array(subset), :]
