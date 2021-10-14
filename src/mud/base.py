@@ -1,5 +1,7 @@
 import numpy as np
+from mud.util import null_space
 from numpy.linalg import inv
+from matplotlib import pyplot as plt
 from scipy.stats import distributions as dist
 from scipy.stats import gaussian_kde as gkde
 
@@ -13,17 +15,17 @@ class LinearGaussianProblem(object):
             data_cov=None):
 
         # Make sure A is 2D array
-        self.A = A.reshape(1, -1)
+        self.A = A if A.ndim == 2 else A.reshape(1, -1)
+        n_samples, dim_input = self.A.shape
 
         # Initialize to defaults - Reshape everythin into 2D arrays.
-        n_samples, dim_input = self.A.shape
         self.data_cov = np.eye(n_samples) if data_cov is None else data_cov
         self.cov = np.eye(dim_input) if cov is None else cov
-        self.mean = np.zeros((dim_input, 1)) if mean is None else mean.reshape(-1,1)
-        self.b = np.zeros((n_samples, 1)) if b is None else b.reshape(-1,1)
-        self.y = np.zeros((n_samples,1)) if y is None else y.reshape(-1,1)
+        self.mean = np.zeros((dim_input, 1)) if mean is None else mean.reshape(-1, 1)
+        self.b = np.zeros((n_samples, 1)) if b is None else b.reshape(-1, 1)
+        self.y = np.zeros((n_samples, 1)) if y is None else y.reshape(-1, 1)
 
-        n_data, n_targets = y.shape
+        n_data, n_targets = self.y.shape
 
         if n_samples != n_data:
             raise ValueError(
@@ -41,11 +43,13 @@ class LinearGaussianProblem(object):
         self.sol = None
 
 
-    def plot_contours(self, ref_param, ax, subset=None,
+    def plot_contours(self, ref_param, ax=None, subset=None,
             color="k", ls=":", lw=1, fs=20, w=1, s=100, **kwds):
         """Plot Linear Map Contours
 
         """
+        if ax is None:
+            _, ax = plt.subplots(1, 1)
         # All rows of A are default subset of contours to plot
         subset = np.arange(self.A.shape[0]) if subset is None else subset
 
@@ -77,19 +81,16 @@ class LinearGaussianProblem(object):
 
         self.sol = self.mean + self.update @ self.z
 
-
-    def estimate(self):
-        if self.sol is None:
-            return self.sol()
+        return self.sol
 
 
-class IterativeLinearProblem(object):
+class IterativeLinearProblem(LinearGaussianProblem):
 
 
     def __init__(self, A, b, y=None, initial_mean=None, cov=None, data_cov=None,
             idx_order=None):
         # Make sure A is 2D array
-        self.A = A.reshape(1, -1)
+        self.A = A if A.ndim == 2 else A.reshape(1, -1)
 
         # Initialize to defaults - Reshape everythin into 2D arrays.
         n_samples, dim_input = self.A.shape
@@ -103,49 +104,84 @@ class IterativeLinearProblem(object):
         # Verify arguments?
 
         # Initialize chain to initial mean
-        self.sub_probs = []
-        self.solution_chain = [initial_mean]
+        self.epochs = []
+        self.solution_chains = []
+        self.errors = []
 
 
-    def iterate(self, num_epochs=1, idx=None, method='MUD'):
+    def solve(self, num_epochs=1, method='mud'):
         """
         Iterative Solutions
         Performs num_epochs iterations of estimates
 
         """
-        for _ in range(num_epochs):
+        m_init = self.initial_mean if len(self.solution_chains)==0 else self.solution_chains[-1][-1]
+        solutions = [m_init]
+        for _ in range(0, num_epochs):
+            epoch = []
+            solutions = [solutions[-1]]
             for i in self.idx_order:
                 # Add next sub-problem to chain
-                self.sub_probs.append(LinearMUD(A[i, :], b[i], y[i],
-                    mean=self.mud_chain[-1],
+                epoch.append(LinearGaussianProblem(self.A[i, :],
+                    self.b[i],
+                    self.y[i],
+                    mean=solutions[-1],
                     cov=self.cov,
                     data_cov=self.data_cov))
 
                 # Solve next mud problem
-                mud_chain.append(prob.estimate())
+                solutions.append(epoch[-1].solve(method=method))
+
+            self.epochs.append(epoch)
+            self.solution_chains.append(solutions)
+
+        return self.solution_chains[-1][-1]
 
 
-class LinearBayes(LinearGaussianProblem):
-    """
+    def get_errors(self, ref_param):
+        """
+        Get errors with resepct to a reference parameter
 
-    """
-
-    def __init__(self, A, b, y=None, mean=None, cov=None, data_cov=None, w=1):
-        super.__init__(A, b, y=y, mean=mean, cov=cov, data_cov=data_cov)
-        self.w = w
-        self.map_point = None
-
-
-    def map_point(self):
-        dc_i = inv(self.data_cov)
-        post_cov = inv(self.A.T @ dc_i @ self.A + self.w * inv(self.cov))
-        self.update = post_cov @ A.T @ dc_i
-        self.map_point = mean + update @ z
+        """
+        solutions = np.concatenate([x[1:] for x in self.solution_chains])
+        if len(solutions)!=len(self.errors):
+            self.errors = [np.linalg.norm(s - ref_param) for s in solutions]
+        return self.errors
 
 
-    def estimate(self):
-        if self.map_point is None:
-            return self.map_point()
+    def plot_chain(self, ref_param, ax=None, color="k", s=100, **kwargs):
+        """
+        Plot chain of solutions and contours
+        """
+        if ax is None:
+            _, ax = plt.subplots(1, 1)
+        for e, chain in enumerate(self.solution_chains):
+            num_steps = len(chain)
+            current_point = chain[0]
+            ax.scatter(current_point[0], current_point[1], c="b", s=s)
+            for i in range(0, num_steps):
+                next_point = chain[i]
+                points = np.hstack([current_point, next_point])
+                ax.plot(points[0, :], points[1, :], c=color)
+                current_point = next_point
+            ax.scatter(current_point[0], current_point[1], c="g", s=s)
+            ax.scatter(ref_param[0], ref_param[1], c="r", s=s)
+        self.plot_contours(ref_param, ax=ax, subset=self.idx_order,
+                color=color, s=s, **kwargs)
+
+
+    def plot_chain_error(self, ref_param, ax=None, alpha=1.0,
+            color="k", label=None, s=100, fontsize=12):
+        """
+        Plot error over iterations
+        """
+        _ = self.get_errors(ref_param)
+        if ax is None:
+            _, ax = plt.subplots(1, 1)
+        ax.set_yscale('log')
+        ax.plot(self.errors, color=color, alpha=alpha, label=label)
+        ax.set_ylabel("$||\lambda - \lambda^\dagger||$", fontsize=fontsize)
+        ax.set_xlabel("Iteration step", fontsize=fontsize)
 
 
 
