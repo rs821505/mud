@@ -1,14 +1,11 @@
 import pdb
 import numpy as np
-from mud.util import null_space, make_2d_unit_mesh, updated_cov
-from numpy.linalg import inv
-from matplotlib import cm
 from matplotlib import pyplot as plt
 from scipy.stats import distributions as dist
 from scipy.stats import gaussian_kde as gkde
 
 
-class DensityProblem(object):
+class DataConsistentProblem(object):
     """Data-Consistent Inverse Problem for parameter identification
 
     Data-Consistent inversion is a way to infer most likely model paremeters
@@ -33,7 +30,7 @@ class DensityProblem(object):
     data is the identity map and observed signal comes from true value plus
     some random gaussian nose:
 
-    >>> from mud.base import DensityProblem
+    >>> from mud.base import DataConsistentProblem
     >>> from mud.funs import wme
     >>> import numpy as np
     >>> def test_wme_data(domain, num_samples, num_obs, noise, true):
@@ -46,7 +43,7 @@ class DensityProblem(object):
     ...     # Compute weighted mean error between predicted and observed values
     ...     y = wme(predicted, observed)
     ...     # Build density problem, with wme values as the model data
-    ...     return DensityProblem(X, y, [domain])
+    ...     return DataConsistentProblem(X, y, [domain])
 
     Set up well-posed problem:
     >>> D = test_wme_data([0,1], 1000, 50, 0.05, 0.5)
@@ -292,24 +289,27 @@ class DensityProblem(object):
         x_range = x_range if x_range is not None else self.domain
         x_plot = np.linspace(x_range.T[0], x_range.T[1], num=aff)
 
-        # Compute initial plot based off of stored initial distribution
-        in_plot = self._in_dist.pdf(x_plot)
+        if in_opts is not None:
+            # Compute initial plot based off of stored initial distribution
+            in_plot = self._in_dist.pdf(x_plot)
 
-        # Compute r ratio if hasn't been already.
-        if self._r is None:
-            self.fit()
+            # Plot initial distribution over parameter space
+            ax.plot(x_plot[:,param_idx], in_plot[:,param_idx], **in_opts)
 
-        # pi_up - kde over params weighted by r
-        up_plot = gkde(self.X.T, weights=self._r)(x_plot.T)
-        if self.param_dim==1:
-            # Reshape two two-dimensional array if one-dim output
-            up_plot = up_plot.reshape(-1,1)
 
-        # Plot initial distribution over parameter space
-        ax.plot(x_plot[:,param_idx], in_plot[:,param_idx], **in_opts)
+        if up_opts is not None:
+            # Compute r ratio if hasn't been already.
+            if self._r is None:
+                self.fit()
 
-        # Plut updated distribution over parameter space
-        ax.plot(x_plot[:,param_idx], up_plot[:,param_idx], **up_opts)
+            # pi_up - kde over params weighted by r
+            up_plot = gkde(self.X.T, weights=self._r)(x_plot.T)
+            if self.param_dim==1:
+                # Reshape two two-dimensional array if one-dim output
+                up_plot = up_plot.reshape(-1,1)
+
+            # Plut updated distribution over parameter space
+            ax.plot(x_plot[:,param_idx], up_plot[:,param_idx], **up_opts)
 
 
     def plot_obs_space(self,
@@ -333,178 +333,29 @@ class DensityProblem(object):
         # Default x_range to full domain of all parameters
         y_plot = np.linspace(y_range.T[0], y_range.T[1], num=aff)
 
-        # Compute PF of initial
-        pf_in_plot = self._pr_dist(y_plot.T)
-        if self.obs_dim==1:
-            # Reshape two two-dimensional array if one-dim output
-            pf_in_plot = pf_in_plot.reshape(-1,1)
+        if pf_in_opts is not None:
+            # Compute PF of initial
+            pf_in_plot = self._pr_dist(y_plot.T)
+            if self.obs_dim==1:
+                # Reshape two two-dimensional array if one-dim output
+                pf_in_plot = pf_in_plot.reshape(-1,1)
 
-        # Compute r ratio if hasn't been already.
-        if self._r is None:
-            self.fit()
+            # Plot pf of initial
+            ax.plot(y_plot[:,obs_idx], pf_in_plot[:,obs_idx], **pf_in_opts)
 
-        # Compute PF of updated
-        pf_up_plot = gkde(self.y.T, weights=self._r)(y_plot.T)
-        if self.obs_dim==1:
-            # Reshape two two-dimensional array if one-dim output
-            pf_up_plot = pf_up_plot.reshape(-1,1)
+        if pf_up_opts is not None:
+            # Compute r ratio if hasn't been already.
+            if self._r is None:
+                self.fit()
 
-        # Plot pf of initial
-        ax.plot(y_plot[:,obs_idx], pf_in_plot[:,obs_idx], **pf_in_opts)
+            # Compute PF of updated
+            pf_up_plot = gkde(self.y.T, weights=self._r)(y_plot.T)
+            if self.obs_dim==1:
+                # Reshape two two-dimensional array if one-dim output
+                pf_up_plot = pf_up_plot.reshape(-1,1)
 
-        # Plut pf of updated
-        ax.plot(y_plot[:,obs_idx], pf_up_plot[:,obs_idx], **pf_up_opts)
-
-
-
-class BayesProblem(object):
-    """
-    Sets up Bayesian Inverse Problem for parameter identification
+            # Plut pf of updated
+            ax.plot(y_plot[:,obs_idx], pf_up_plot[:,obs_idx], **pf_up_opts)
 
 
-    Example Usage
-    -------------
-
-    >>> from mud.base import BayesProblem
-    >>> import numpy as np
-    >>> from scipy.stats import distributions as ds
-    >>> X = np.random.rand(100,1)
-    >>> num_obs = 50
-    >>> Y = np.repeat(X, num_obs, 1)
-    >>> y = np.ones(num_obs)*0.5 + np.random.randn(num_obs)*0.05
-    >>> B = BayesProblem(X, Y, np.array([[0,1], [0,1]]))
-    >>> B.set_likelihood(ds.norm(loc=y, scale=0.05))
-    >>> np.round(B.map_point()[0],1)
-    0.5
-
-    """
-
-    def __init__(self, X, y, domain=None):
-        self.X = X
-        if y.ndim == 1:
-            y = y.reshape(-1, 1)
-        self.y = y
-        self.domain = domain
-        self._ps = None
-        self._pr = None
-        self._ll = None
-
-    def set_likelihood(self, distribution, log=False):
-        if log:
-            self._log = True
-            self._ll = distribution.logpdf(self.y).sum(axis=1)
-            # below is an equivalent evaluation (demonstrating the expected symmetry)
-            # std, mean = distribution.std(), distribution.mean()
-            # self._ll = dist.norm(self.y, std).logpdf(mean).sum(axis=1)
-        else:
-            self._log = False
-            self._ll = distribution.pdf(self.y).prod(axis=1)
-            # equivalent
-            # self._ll = dist.norm(self.y).pdf(distribution.mean())/distribution.std()
-            # self._ll = self._ll.prod(axis=1)
-        self._ps = None
-
-    def set_prior(self, distribution=None):
-        if distribution is None:  # assume standard normal by default
-            if self.domain is not None:  # assume uniform if domain specified
-                mn = np.min(self.domain, axis=1)
-                mx = np.max(self.domain, axis=1)
-                distribution = dist.uniform(loc=mn, scale=mx - mn)
-            else:
-                distribution = dist.norm()
-        prior_dist = distribution
-        self._pr = prior_dist.pdf(self.X).prod(axis=1)
-        self._ps = None
-
-    def fit(self):
-        if self._pr is None:
-            self.set_prior()
-        if self._ll is None:
-            self.set_likelihood()
-
-        if self._log:
-            ps_pdf = np.add(np.log(self._pr), self._ll)
-        else:
-            ps_pdf = np.multiply(self._pr, self._ll)
-
-        assert ps_pdf.shape[0] == self.X.shape[0]
-        if np.sum(ps_pdf) == 0:
-            raise ValueError("Posterior numerically unstable.")
-        self._ps = ps_pdf
-
-    def map_point(self):
-        if self._ps is None:
-            self.fit()
-        m = np.argmax(self._ps)
-        return self.X[m, :]
-
-    def estimate(self):
-        return self.map_point()
-
-
-
-class WeightedDensityProblem(DensityProblem):
-    """
-    Sets up a Weighted Data-Consistent Inverse Problem for parameter
-    identification.
-
-
-    Example Usage
-    -------------
-
-    >>> from mud.base import WeightedDensityProblem as WDP
-    >>> from mud.funs import wme
-    >>> import numpy as np
-    >>> num_sapmles = 100
-    >>> X = np.random.rand(num_samples,1)
-    >>> num_obs = 50
-    >>> Y = np.repeat(X, num_obs, 1)
-    >>> y = np.ones(num_obs)*0.5 + np.random.randn(num_obs)*0.05
-    >>> W = wme(Y, y)
-    >>> weights = np.ones(num_samples)
-    >>> B = WDP(X, W, domain=np.array([[0,1], [0,1]]), weights=weights)
-    >>> np.round(B.mud_point()[0],1)
-    0.5
-    >>> np.round(B.exp_r(),1)
-    1.2
-
-    """
-    def __init__(self, X, y, domain=None, weights=None):
-        super().__init__(X, y, domain=domain)
-        self.set_weights(weights)
-
-
-    def set_weights(self, weights=None):
-        # weights is array of ones if non specified, and 2D always
-        w = np.ones(self.X.shape[0]) if weights is None else weights
-        w = w.reshape(1, -1) if w.ndim==1 else weights
-
-        # Verify length of each weight vectors match number of samples in X
-        assert self.X.shape[0]==w.shape[1]
-
-        # Multiply weights column wise to get one weight row vector
-        w = np.prod(w, axis=0)
-
-        # Normalize weight vector
-        self._weights  = np.divide(w, np.sum(w,axis=0))
-
-        # Re-set initial, predicted, and updated
-        self._in = None
-        self._pr = None
-        self._up = None
-
-
-    def set_initial(self, distribution=None):
-        super().set_initial(distribution=distribution)
-        self._in = self._in * self._weights
-
-
-    def set_predicted(self, distribution=None, bw_method=None):
-        super.set_predicted(distribution=distribution, weights=self._weights)
-
-
-    def exp_r(self):
-        if self._up is None:
-            self.fit()
-        return np.average(self._r, weights=self._weights)
 
