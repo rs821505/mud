@@ -72,7 +72,7 @@ class DataConsistentProblem(object):
 
     """
 
-    def __init__(self, X, y, domain=None):
+    def __init__(self, X, y, domain=None, weights=None):
 
         # Set inputs
         self.X = X
@@ -102,6 +102,30 @@ class DataConsistentProblem(object):
         self._pr_dist = None
         self._ob_dist = None
         self._up_dist = None
+
+        # Initialize Weights
+        self.set_weights(weights)
+
+
+    def set_weights(self, weights=None):
+        if weights is None:
+            w = np.ones(self.X.shape[0])
+        else:
+            w = weights.reshape(1, -1) if weights.ndim==1 else weights
+
+            # Verify length of each weight vectors match number of samples in X
+            assert self.X.shape[0]==w.shape[1]
+
+            # Multiply weights column wise to get one weight row vector
+            w = np.prod(w, axis=0)
+
+            # Normalize weight vector
+            w  = np.divide(w, np.sum(w,axis=0))
+
+        # Re-set predicted, and updated since they're affected by weights
+        self._weights = w
+        self._pr = None
+        self._up = None
 
 
     def set_observed(self, distribution=dist.norm()):
@@ -140,7 +164,7 @@ class DataConsistentProblem(object):
             else:
                 distribution = dist.norm()
         self._in_dist = distribution
-        self._in = self._in_dist.pdf(self.X).prod(axis=1)
+        self._in = self._in_dist.pdf(self.X).prod(axis=1) * self._weights
         self._up = None
         self._pr = None
 
@@ -167,8 +191,12 @@ class DataConsistentProblem(object):
         Returns
         -------
         """
+        if weights is not None:
+            self.set_weights(weights)
+
         if distribution is None:
-            distribution = gkde(self.y.T, bw_method=bw_method, weights=weights)
+            distribution = gkde(self.y.T, bw_method=bw_method,
+                    weights=self._weights)
             pred_pdf = distribution.pdf(self.y.T).T
         else:
             pred_pdf = distribution.pdf(self.y, **kwargs)
@@ -266,7 +294,8 @@ class DataConsistentProblem(object):
         """
         if self._up is None:
             self.fit()
-        return np.mean(self._r)
+
+        return np.average(self._r, weights=self._weights)
 
 
     def plot_param_space(self,
@@ -302,8 +331,8 @@ class DataConsistentProblem(object):
             if self._r is None:
                 self.fit()
 
-            # pi_up - kde over params weighted by r
-            up_plot = gkde(self.X.T, weights=self._r)(x_plot.T)
+            # pi_up - kde over params weighted by r times previous weights
+            up_plot = gkde(self.X.T, weights=self._r * self._weights)(x_plot.T)
             if self.param_dim==1:
                 # Reshape two two-dimensional array if one-dim output
                 up_plot = up_plot.reshape(-1,1)
@@ -356,6 +385,4 @@ class DataConsistentProblem(object):
 
             # Plut pf of updated
             ax.plot(y_plot[:,obs_idx], pf_up_plot[:,obs_idx], **pf_up_opts)
-
-
 

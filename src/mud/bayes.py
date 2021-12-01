@@ -1,7 +1,7 @@
 import pdb
 import numpy as np
 from matplotlib import pyplot as plt
-from scipy.stats import distributions as dist
+from scipy.stats.distributions import norm, uniform
 from scipy.stats import gaussian_kde as gkde
 
 
@@ -46,57 +46,69 @@ class BayesProblem(object):
             # Assert our domain passed in is consistent with data array
             assert domain.shape[0]==self.X.shape[1]
 
-        # Initialize distributions and descerte values to None
+        # Initialize distributions, descerte values
         self._ps = None
         self._pr = None
         self._ll = None
-        self._pr_dist = None
         self._ll_dist = None
+        self._pr_dist = None
 
 
-    def set_likelihood(self, data, sigma, log=False):
+    def set_likelihood(self, distribution, log=False, norm=False):
         """
 
         """
+        self._ll_dist = distribution
         if log:
             self._log = True
             self._ll = distribution.logpdf(self.y).sum(axis=1)
         else:
             self._log = False
             self._ll = distribution.pdf(self.y).prod(axis=1)
-        self._ll_dist = distribution
-        self._ps = None
+
+        if norm==True:
+            self._ll = self._ll/np.linalg.norm(self._ll)
 
 
     def set_prior(self, distribution=None):
+        """
+        Set prior distribution
+
+        """
         if distribution is None:  # assume standard normal by default
             if self.domain is not None:  # assume uniform if domain specified
                 mn = np.min(self.domain, axis=1)
                 mx = np.max(self.domain, axis=1)
-                distribution = dist.uniform(loc=mn, scale=mx - mn)
+                distribution = uniform(loc=mn, scale=mx - mn)
             else:
-                distribution = dist.norm()
+                distribution = norm()
         self._pr_dist = distribution
         self._pr = self._pr_dist.pdf(self.X).prod(axis=1)
         self._ps = None
 
 
-    def fit(self, data=None, log=False):
+    def fit(self, distribution=None):
+        """
+        """
+
+        # Set prior if it hasn't been set
         if self._pr is None:
             self.set_prior()
         if self._ll is None:
-            if data is None:
-                raise ValueError("likelihood not set and data was not passed")
-            self.set_likelihood(data, log)
+            if distribution is None:
+                raise ValueError("Likelihood distribution has not been set")
+            self.set_likelihood(distribution)
 
+        # Compute posterior pdf as product of initial and log likelihood
         if self._log:
             ps_pdf = np.add(np.log(self._pr), self._ll)
         else:
             ps_pdf = np.multiply(self._pr, self._ll)
 
-        assert ps_pdf.shape[0] == self.X.shape[0]
         if np.sum(ps_pdf) == 0:
             raise ValueError("Posterior numerically unstable.")
+
+        # Set posterior
         self._ps = ps_pdf
 
 
@@ -140,7 +152,7 @@ class BayesProblem(object):
         if ps_opts is not None:
             # Compute posterior if it hasn't been already
             if self._ps is None:
-                self.fit()
+                raise ValueError("posterior not set yet. Run fit()")
 
             # ps_plot - kde over params weighted by posterior computed pdf
             ps_plot = gkde(self.X.T, weights=self._ps)(x_plot.T)
@@ -174,8 +186,12 @@ class BayesProblem(object):
         y_plot = np.linspace(y_range.T[0], y_range.T[1], num=aff)
 
         if ll_opts is not None:
+            if self._ll is None:
+                raise ValueError("Likelihood not set. Run fit()")
+
             # Compute Likelihoood values
-            ll_plot = self._ll_dist.pdf(y_plot)
+            ll_plot = self._ll_dist.pdf(y_plot).prod(axis=1)
+
             if self.obs_dim==1:
                 # Reshape two two-dimensional array if one-dim output
                 ll_plot = ll_plot.reshape(-1,1)
@@ -190,6 +206,41 @@ class BayesProblem(object):
                 # Reshape two two-dimensional array if one-dim output
                 pf_ps_plot = pf_ps_plot.reshape(-1,1)
 
-
             # Plut pf of updated
             ax.plot(y_plot[:,obs_idx], pf_ps_plot[:,obs_idx], **pf_ps_opts)
+
+
+class MapProblem(BayesProblem):
+    """
+    Wrapper around BayesianProblem, takes in raw qoi + observed data and
+    instantiates Bayesian Solver object
+
+
+    Example Usage
+    -------------
+
+    >>> from mud.base import BayesProblem
+    >>> import numpy as np
+    >>> from scipy.stats import distributions as ds
+    >>> X = np.random.rand(100,1)
+    >>> num_obs = 50
+    >>> Y = np.repeat(X, num_obs, 1)
+    >>> y = np.ones(num_obs)*0.5 + np.random.randn(num_obs)*0.05
+    >>> B = BayesProblem(X, Y, np.array([[0,1], [0,1]]))
+    >>> B.set_likelihood(ds.norm(loc=y, scale=0.05))
+    >>> np.round(B.map_point()[0],1)
+    0.5
+
+    """
+
+
+    def __init__(self, lam, q_lam, q_obs, sigma, domain=None):
+
+        lam = lam if lam.ndim==1 else lam.reshape(-1,1)
+        q_lam = q_lam if q_lam.ndim==1 else q_lam.reshape(-1,1)
+        q_obs = q_obs if q_obs.ndim==1 else q_obs.reshape(-1,1)
+
+        # Initialize Super Class - Bayesian Problem
+        super().__init__(lam, qoi, domain=domain)
+
+
