@@ -11,11 +11,11 @@ from scipy.stats.contingency import margins  # type: ignore
 
 from mud.plot import plot_dist, plot_vert_line
 from mud.preprocessing import pca, svd
-from mud.util import (add_noise, fit_domain, make_2d_unit_mesh, null_space,
-                      set_shape)
+from mud.util import add_noise, fit_domain, make_2d_unit_mesh, null_space, set_shape
 
 try:
     import xarray as xr  # type: ignore
+
     xr_avial = True
 except ModuleNotFoundError:
     xr_avail = False
@@ -108,7 +108,6 @@ class DensityProblem(object):
         normalize: bool = False,
         pad_domain: float = 0.1,
     ):
-
         self.X = set_shape(np.array(X), (1, -1))
         self.y = set_shape(np.array(y), (-1, 1))
 
@@ -234,15 +233,28 @@ class DensityProblem(object):
         Setting initial distirbution resets the predicted and updated
         distributions, so make sure to set the initial first.
         """
+        if distribution is not None:
+            print(f"X1: {self.X.shape}")
+            print(f"Distribution1: {distribution.shape}")
+
         if distribution is None:  # assume standard normal by default
+            print("ONE")
             if self.domain is not None:  # assume uniform if domain specified
+                print("TWO")
                 mn = np.min(self.domain, axis=1)
                 mx = np.max(self.domain, axis=1)
                 distribution = dist.uniform(loc=mn, scale=mx - mn)
             else:
+                print("THREE")
                 distribution = dist.norm()
 
-        self._in = distribution.pdf(self.X).prod(axis=1)
+            print(f"X2: {self.X.shape}")
+
+        self._in = distribution.pdf(self.X).prod(
+            axis=0
+        )  # ? Assume i.i.d. -> product of initial pdfs p(\lambda_1)p(\lambda_2)...p(\lambda_n)
+        print(f"Distribution2: {self._in.shape}")
+
         self._in_dist = distribution
         self._up = None
         self._pr = None
@@ -349,6 +361,9 @@ class DensityProblem(object):
         self._r = np.divide(self._ob, self._pr)
 
         # Multiply by initial to get updated pdf
+        print(f"IN: {self._in.shape}")
+        print(f"WEIGHTS: {self._weights.shape}")
+        print(f"R: {self._r.shape}")
         up_pdf = np.multiply(self._in * self._weights, self._r)
         self._up = up_pdf
 
@@ -1042,7 +1057,6 @@ class LinearGaussianProblem(object):
         cov_o=None,
         alpha=1.0,
     ):
-
         # Make sure A is 2D array
         A = np.array(A)
         self.A = A if A.ndim == 2 else A.reshape(1, -1)
@@ -1051,8 +1065,9 @@ class LinearGaussianProblem(object):
         # Initialize to defaults - Reshape everything into 2D arrays.
         self.b = np.zeros((ns, 1)) if b is None else np.array(b).reshape(-1, 1)
         self.y = np.zeros((ns, 1)) if y is None else np.array(y).reshape(-1, 1)
-        self.mean_i = np.zeros((di, 1)) if mean_i is None else np.array(
-            mean_i).reshape(-1, 1)
+        self.mean_i = (
+            np.zeros((di, 1)) if mean_i is None else np.array(mean_i).reshape(-1, 1)
+        )
         self.cov_i = np.eye(di) if cov_i is None else np.array(cov_i)
         self.cov_o = np.eye(ns) if cov_o is None else np.array(cov_o)
 
@@ -1350,7 +1365,6 @@ class LinearWMEProblem(LinearGaussianProblem):
         cov_o=None,
         alpha=1.0,
     ):
-
         if isinstance(sigma, (float, int)):
             sigma = [sigma] * len(data)
 
@@ -1424,7 +1438,6 @@ class IterativeLinearProblem(LinearGaussianProblem):
     def __init__(
         self, A, b, y=None, mu_i=None, cov=None, data_cov=None, idx_order=None
     ):
-
         # Make sure A is 2D array
         self.A = A if A.ndim == 2 else A.reshape(1, -1)
 
@@ -1544,7 +1557,6 @@ class SpatioTemporalProblem(object):
     """
 
     def __init__(self, df=None):
-
         self._domain = None
         self._lam = None
         self._data = None
@@ -1709,7 +1721,7 @@ class SpatioTemporalProblem(object):
 
     @sample_dist.setter
     def sample_dist(self, dist):
-        if dist not in ["u", "n"]:
+        if dist not in ["n", "n", "beta", "multi_normal"]:
             raise ValueError(
                 "distribution could not be inferred. Must be from ('u', 'n')"
             )
@@ -1807,20 +1819,22 @@ class SpatioTemporalProblem(object):
             elif v is not None and type(v) != str:
                 self.__setattr__(f, v)
 
-        field_names = {'sample_dist': 'sample_dist',
-                       'domain': 'domain',
-                       'sensors': 'sensors',
-                       'times': 'times',
-                       'lam_ref': 'lam_ref',
-                       'std_dev': 'std_dev',
-                       'true_vals': 'true_vals',
-                       'measurements': 'measurements'}
+        field_names = {
+            "sample_dist": "sample_dist",
+            "domain": "domain",
+            "sensors": "sensors",
+            "times": "times",
+            "lam_ref": "lam_ref",
+            "std_dev": "std_dev",
+            "true_vals": "true_vals",
+            "measurements": "measurements",
+        }
         field_names.update(kwargs)
         for f, v in field_names.items():
             get_set_val(f, v)
 
-        get_set_val('lam', lam)
-        get_set_val('data', data)
+        get_set_val("lam", lam)
+        get_set_val("data", data)
 
         return ds
 
@@ -2016,6 +2030,18 @@ class SpatioTemporalProblem(object):
 
             # Compute WME
             qoi = residuals @ pca_res.components_.T
+
+        elif method == "traditional":
+            print(f"residuals.T dims: {residuals.T.shape}")
+            print(f"data dims: {sub_data.shape}")
+            print(f"sub_meas dims: {sub_meas.shape}")
+            measurement_cov = np.cov(sub_meas)
+            print(f"measurement_cov dims: {measurement_cov.shape}")
+
+            qoi = np.linalg.inv(measurement_cov) @ residuals.T
+            print(f"qoi dims: {qoi.shape}")
+            print(f"qoi min: {np.min(qoi)}")
+
         elif method == "svd":
             # Learn qoi to use using SVD
             u, s, v = svd(residuals)
