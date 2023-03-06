@@ -233,27 +233,24 @@ class DensityProblem(object):
         Setting initial distirbution resets the predicted and updated
         distributions, so make sure to set the initial first.
         """
-        if distribution is not None:
-            print(f"X1: {self.X.shape}")
-            print(f"Distribution1: {distribution.shape}")
+        # if distribution is not None:
+        # print(f"X1: {self.X.shape}")
+        # print(f"Distribution1: {distribution.shape}")
 
         if distribution is None:  # assume standard normal by default
-            print("ONE")
             if self.domain is not None:  # assume uniform if domain specified
-                print("TWO")
                 mn = np.min(self.domain, axis=1)
                 mx = np.max(self.domain, axis=1)
                 distribution = dist.uniform(loc=mn, scale=mx - mn)
             else:
-                print("THREE")
                 distribution = dist.norm()
 
-            print(f"X2: {self.X.shape}")
+            # print(f"X2: {self.X.shape}")
 
         self._in = distribution.pdf(self.X).prod(
-            axis=0
+            axis=1
         )  # ? Assume i.i.d. -> product of initial pdfs p(\lambda_1)p(\lambda_2)...p(\lambda_n)
-        print(f"Distribution2: {self._in.shape}")
+        # print(f"Distribution2: {self._in.shape}")
 
         self._in_dist = distribution
         self._up = None
@@ -361,9 +358,7 @@ class DensityProblem(object):
         self._r = np.divide(self._ob, self._pr)
 
         # Multiply by initial to get updated pdf
-        print(f"IN: {self._in.shape}")
-        print(f"WEIGHTS: {self._weights.shape}")
-        print(f"R: {self._r.shape}")
+
         up_pdf = np.multiply(self._in * self._weights, self._r)
         self._up = up_pdf
 
@@ -1721,7 +1716,7 @@ class SpatioTemporalProblem(object):
 
     @sample_dist.setter
     def sample_dist(self, dist):
-        if dist not in ["n", "n", "beta", "multi_normal"]:
+        if dist not in ["u", "n", "beta", "multi_normal"]:
             raise ValueError(
                 "distribution could not be inferred. Must be from ('u', 'n')"
             )
